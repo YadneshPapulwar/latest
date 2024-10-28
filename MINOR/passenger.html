@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Passenger Rides</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <nav class="navbar navbar-expand-sm navbar-dark bg-dark">
+        <div class="container-fluid">
+          <a class="navbar-brand" href="#">Carpool</a>
+          <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarsExample03" aria-controls="navbarsExample03" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+          </button>
+          <div class="navbar-collapse collapse" id="navbarsExample03">
+            <ul class="navbar-nav me-auto mb-2 mb-sm-0">
+                <li class="nav-item">
+                    <a class="nav-link" href="#">Home</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="index.html">Driver</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link active" aria-current="page" href="#">Passenger</a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="dashboard.php">Dashboard</a>
+                </li>
+            </ul>
+            <ul class="navbar-nav ms-auto">
+                <li class="nav-item">
+                    <a class="nav-link active" aria-current="page" href="logout.php">Log Out</a>
+                </li>
+            </ul>
+          </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h2 class="text-center mb-4">Find Available Rides</h2>
+        
+        <!-- Passenger Ride Request Form -->
+        <form id="rideSearchForm" class="mb-4" onsubmit="searchRides(event)">
+            <div class="mb-3">
+                <label for="startLocation" class="form-label">Start Location</label>
+                <input type="text" class="form-control" id="startLocation" placeholder="Enter your start location" required>
+            </div>
+            <div class="mb-3">
+                <label for="endLocation" class="form-label">End Location</label>
+                <input type="text" class="form-control" id="endLocation" placeholder="Enter your end location" required>
+            </div>
+            <button type="submit" class="btn btn-primary">Search Rides</button>
+        </form>
+
+        <h2 class="text-center mb-4">Available Rides</h2>
+        <div id="ridesContainer" class="row"></div>
+        <div id="loadingSpinner" class="spinner-grow text-primary" role="status" style="display: none; position: relative; top: 50%; left: 50%; ">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+        
+    </div>
+    
+
+    <script>
+        const apiKey = 'LHb0PtgzKlGLpp4YTM6oHgQTcUnF4DuEb76reivs'; 
+
+        function searchRides(event) {
+    event.preventDefault();
+    const startLocation = document.getElementById('startLocation').value;
+    const endLocation = document.getElementById('endLocation').value;
+    document.getElementById('loadingSpinner').style.display = 'block';
+    
+    Promise.all([
+        geocodeLocation(startLocation),
+        geocodeLocation(endLocation)
+    ]).then(coords => {
+        const [startCoords, endCoords] = coords;
+        
+        console.log("Start Coordinates: ", startCoords);
+        console.log("End Coordinates: ", endCoords);
+        
+        // Check for NaN values
+        if (!startCoords || !endCoords || isNaN(startCoords.lat) || isNaN(startCoords.lng) || isNaN(endCoords.lat) || isNaN(endCoords.lng)) {
+            console.error("One of the coordinates is NaN", { startCoords, endCoords });
+            alert("Failed to get valid coordinates for the locations.");
+            return; // Exit if coordinates are invalid
+        }
+        
+        fetchRides(startCoords, endCoords);
+    }).catch(error => {
+        console.error('Geocoding error:', error);
+        alert('Error fetching coordinates: ' + error.message);
+    });
+}
+
+
+        function geocodeLocation(location) {
+    const geocodeUrl = `https://api.olamaps.io/places/v1/geocode?address=${encodeURIComponent(location)}&language=English&api_key=${apiKey}`;
+    
+    return fetch(geocodeUrl)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Geocoding error! Status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data && data.geocodingResults && data.geocodingResults.length > 0) {
+                const coords = {
+                    lat: data.geocodingResults[0].geometry.location.lat,
+                    lng: data.geocodingResults[0].geometry.location.lng
+                };
+                console.log(`Geocoded Location: ${location}`, coords); // Log the coordinates
+                return coords;
+            } else {
+                throw new Error('Location not found');
+            }
+        });
+}
+
+
+function fetchRides(startCoords, endCoords) {
+    document.getElementById('loadingSpinner').style.display = 'block';
+    console.log("Start Coordinates:", startCoords);
+    console.log("End Coordinates:", endCoords);
+
+    fetch('getRides.php')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(async rides => {
+            const ridesContainer = document.getElementById('ridesContainer');
+            ridesContainer.innerHTML = '';
+
+            for (const ride of rides) {
+                const rideStartCoords = { lat: parseFloat(ride.start_lat), lng: parseFloat(ride.start_lng) };
+                const rideEndCoords = { lat: parseFloat(ride.end_lat), lng: parseFloat(ride.end_lng) };
+
+                // Log the coordinates being processed
+                console.log(`Ride Start Coords:`, rideStartCoords);
+                console.log(`Ride End Coords:`, rideEndCoords);
+
+                // Check for NaN values in coordinates
+                if (isNaN(rideStartCoords.lat) || isNaN(rideStartCoords.lng) ||
+                    isNaN(rideEndCoords.lat) || isNaN(rideEndCoords.lng)) {
+                    console.warn('One or more coordinates are invalid for this ride:', ride);
+                    continue; // Skip this ride if coordinates are invalid
+                }
+
+                // Calculate distances to both start and end locations
+                const distanceToStart = await calculateDistance(startCoords, rideStartCoords);
+                const distanceToEnd = await calculateDistance(endCoords, rideEndCoords);
+                console.log(`Distance to start: ${distanceToStart} km, Distance to end: ${distanceToEnd} km`);
+
+                // Check if both distances are within the 10 km radius
+                if (distanceToStart <= 10 && distanceToEnd <= 10) {
+                    const startAddress = await reverseGeocode(rideStartCoords.lat, rideStartCoords.lng);
+                    const endAddress = await reverseGeocode(rideEndCoords.lat, rideEndCoords.lng);
+
+                    // Calculate the meeting point using valid coordinates
+                    const meetingPoint = {
+                        lat: (rideStartCoords.lat + rideEndCoords.lat) / 2,
+                        lng: (rideStartCoords.lng + rideEndCoords.lng) / 2
+                    };
+
+                    // Use reverse geocoding for the meeting point
+                    const meetingPointAddress = await reverseGeocode(meetingPoint.lat, meetingPoint.lng);
+                    console.log(`Meeting Point Address: ${meetingPointAddress}`);
+
+                    // Create ride element and append it to rides container
+                    const rideElement = document.createElement('div');
+                    rideElement.className = 'col-md-6 mb-3';
+                    rideElement.innerHTML = `
+                        <div class="card">
+                            <div class="card-body">
+                                <p class="card-text"><strong>Start Location:</strong> ${startAddress}</p>
+                                <p class="card-text"><strong>End Location:</strong> ${endAddress}</p>
+                                <p class="card-text"><strong>Meeting Point:</strong> ${meetingPointAddress}</p>
+                                <p class="card-text"><strong>Date & Time:</strong> ${ride.start_datetime}</p>
+                                <p class="card-text"><strong>Seats Available:</strong> ${ride.seats_available}</p>
+                                <p class="card-text"><strong>Price to be split:</strong> ${ride.custom_price}</p>
+                                <button class="btn btn-primary" onclick="requestRide(${ride.id})">Request Ride</button>
+                            </div>
+                        </div>
+                    `;
+                    ridesContainer.appendChild(rideElement);
+                } else {
+                    console.log('Ride is not within the distance threshold.');
+                }
+            }
+
+            // If no rides are found within 10 km
+            if (ridesContainer.innerHTML === '') {
+                ridesContainer.innerHTML = '<p class="text-center">No rides available within 10 km.</p>';
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching rides:', error);
+            alert('Error fetching rides: ' + error.message);
+        })
+        .finally(() => {
+            document.getElementById('loadingSpinner').style.display = 'none';
+        });
+}
+
+
+
+
+function calculateDistance(startCoords, endCoords) {
+    const url = `https://api.olamaps.io/routing/v1/distanceMatrix?origins=${startCoords.lat},${startCoords.lng}&destinations=${endCoords.lat},${endCoords.lng}&mode=driving&api_key=${apiKey}`;
+
+    return fetch(url, {
+        method: 'GET',
+        headers: {
+            'accept': 'application/json',
+            'X-Request-Id': 'esha',
+            'X-Correlation-Id': 'carpool',
+        },
+    })
+    .then(response => {
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+        return response.json();
+    })
+    .then(data => {
+        console.log("API Response: ", data); // Log the entire response
+
+        // Check if the status indicates success
+        if (data.status !== 'SUCCESS') {
+            console.error(`API Error: ${data.status}`);
+            return null; // Return null if there's an error
+        }
+
+        // Access the distance from the elements array
+        if (data.rows && data.rows.length > 0 && data.rows[0].elements.length > 0) {
+            const element = data.rows[0].elements[0];
+            if (element.status === 'OK') {
+                const distance = element.distance; // Distance in meters
+                console.log(`Distance covered by the route: ${(distance / 1000).toFixed(2)} km`); 
+                return (distance / 1000).toFixed(2); // Return distance in km
+            } else {
+                console.error("No valid route found");
+                return null; // Return null if no valid route
+            }
+        } else {
+            console.error("No elements found in the response");
+            return null; // Return null if no elements found
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching route data:', error);
+        return null; // Return null on error
+    });
+}
+
+
+        function degreesToRadians(degrees) {
+            return degrees * (Math.PI/180);
+        }
+
+        function reverseGeocode(lat, lng) {
+    // If lat or lng is NaN, return a placeholder or the original input location name
+    if (isNaN(lat) || isNaN(lng)) {
+        return Promise.resolve('Invalid Coordinates'); // Adjust this to reflect how you want to handle NaN
+    }
+
+    const geocodeUrl = `https://api.olamaps.io/places/v1/reverse-geocode?latlng=${lat},${lng}&api_key=${apiKey}`;
+
+    console.log(`Reverse geocoding for lat: ${lat}, lng: ${lng}`); // Log coordinates
+
+    return fetch(geocodeUrl, {
+        method: 'GET',
+        headers: {
+            'accept': 'application/json',
+            'X-Request-Id': 'esha',
+            'X-Correlation-Id': 'carpool',
+        },
+    })
+    .then(response => {
+        return response.json().then(data => {
+            console.log("Reverse Geocode Response: ", data); // Log the response
+            if (!response.ok) {
+                console.error(`Reverse geocoding error! Status: ${response.status}`);
+                throw new Error(`Reverse geocoding error! Status: ${response.status}`);
+            }
+            if (data && data.results && data.results.length > 0) {
+                return data.results[0].formatted_address; 
+            } else {
+                console.warn('No results found in reverse geocoding response');
+                return 'Address not found';
+            }
+        });
+    })
+    .catch(error => {
+        console.error('Error in reverse geocoding:', error);
+        return 'Error fetching address';
+    });
+}
+
+
+
+        
+        
+
+function fetchAllRides() {
+    const loadingSpinner = document.getElementById('loadingSpinner');
+    
+    loadingSpinner.style.display = 'block';
+
+    fetch('getRides.php') 
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(async rides => {
+            const ridesContainer = document.getElementById('ridesContainer');
+            ridesContainer.innerHTML = ''; 
+            if (rides.length === 0) {
+                ridesContainer.innerHTML = '<p class="text-center">No rides available.</p>';
+            } else {
+                for (const ride of rides) {
+                    const startAddress = await reverseGeocode(ride.start_lat, ride.start_lng);
+                    const endAddress = await reverseGeocode(ride.end_lat, ride.end_lng);
+
+                    const rideElement = document.createElement('div');
+                    rideElement.className = 'col-md-6 mb-3';
+                    rideElement.innerHTML = `
+                        <div class="card">
+                            <div class="card-body">
+                                <p class="card-text"><strong>Start Location:</strong> ${startAddress}</p>
+                                <p class="card-text"><strong>End Location:</strong> ${endAddress}</p>
+                                <p class="card-text"><strong>Date & Time:</strong> ${ride.start_datetime}</p>
+                                <p class="card-text"><strong>Seats Available:</strong> ${ride.seats_available}</p>
+                                <p class="card-text"><strong>Price to be split:</strong> ${ride.custom_price}</p>
+                                <button class="btn btn-primary" onclick="requestRide(${ride.id})">Request Ride</button>
+                            </div>
+                        </div>
+                    `;
+                    ridesContainer.appendChild(rideElement);
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error fetching rides:', error);
+            alert('Error fetching rides: ' + error.message);
+        })
+        .finally(() => {
+            loadingSpinner.style.display = 'none';
+        });
+}
+function requestRide(rideId) {
+    fetch('request_ride.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+            'ride_id': rideId
+        })
+    })
+    .then(response => response.text())
+    .then(data => {
+        alert(data); // Show the response message from the server
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Error requesting ride: ' + error.message);
+    });
+}
+window.onload = () => {
+            fetchAllRides(); 
+        };
+
+        window.onload = () => {
+    fetchAllRides();
+
+    // Retrieve coordinates from session storage
+    const driverStartCoords = JSON.parse(sessionStorage.getItem('driverStartCoords'));
+    const driverEndCoords = JSON.parse(sessionStorage.getItem('driverEndCoords'));
+
+    if (driverStartCoords && driverEndCoords) {
+        // Calculate the meeting point
+        const meetingPoint = {
+            lat: (driverStartCoords.lat + driverEndCoords.lat) / 2,
+            lng: (driverStartCoords.lng + driverEndCoords.lng) / 2
+        };
+
+        // Display the meeting point on the map
+        displayMeetingPoint(meetingPoint);
+    }
+};
+
+// Function to display the meeting point
+function displayMeetingPoint(coords) {
+    // Assuming you're using the same map SDK and you have a map object
+    const map = new ol.Map({
+        target: 'map',
+        layers: [
+            new ol.layer.Tile({
+                source: new ol.source.OSM()
+            })
+        ],
+        view: new ol.View({
+            center: ol.proj.fromLonLat([coords.lng, coords.lat]),
+            zoom: 10
+        })
+    });
+
+    // Add a marker for the meeting point
+    const marker = new ol.Feature({
+        geometry: new ol.geom.Point(ol.proj.fromLonLat([coords.lng, coords.lat]))
+    });
+
+    const vectorSource = new ol.source.Vector({
+        features: [marker]
+    });
+
+    const markerVectorLayer = new ol.layer.Vector({
+        source: vectorSource
+    });
+
+    map.addLayer(markerVectorLayer);
+}
+
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
